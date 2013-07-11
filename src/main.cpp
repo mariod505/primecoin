@@ -1747,7 +1747,7 @@ bool SetBestChain(CValidationState &state, CBlockIndex* pindexNew)
         if (fBenchmark)
             printf("- Disconnect: %.2fms\n", (GetTimeMicros() - nStart) * 0.001);
 
-        // Queue memory transactions to resurrect.
+        // Queue  memory transactions to resurrect.
         // We only do this for blocks after the last checkpoint (reorganisation before that
         // point should only happen with -reindex/-loadblock, or a misbehaving peer.
         BOOST_FOREACH(const CTransaction& tx, block.vtx)
@@ -1843,7 +1843,7 @@ bool SetBestChain(CValidationState &state, CBlockIndex* pindexNew)
     nTimeBestReceived = GetTime();
     nTransactionsUpdated++;
     uint256 nBlockWork = pindexNew->nChainWork - (pindexNew->pprev? pindexNew->pprev->nChainWork : 0);
-    printf("SetBestChain: new best=%s  height=%d  difficulty=%.8g log2Work=%.8g  log2ChainWork=%.8g  tx=%lu  date=%s progress=%f\n",
+    printf("- SetBestChain: new best=%s  height=%d  difficulty=%.8g log2Work=%.8g  log2ChainWork=%.8g  tx=%lu  date=%s progress=%f\n",
       hashBestChain.ToString().c_str(), nBestHeight, GetPrimeDifficulty(pindexNew->nBits), log(nBlockWork.getdouble())/log(2.0), log(nBestChainWork.getdouble())/log(2.0), (unsigned long)pindexNew->nChainTx,
       DateTimeStrFormat("%Y-%m-%d %H:%M:%S", pindexBest->GetBlockTime()).c_str(),
       Checkpoints::GuessVerificationProgress(pindexBest));
@@ -4435,9 +4435,10 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
 
         nLastBlockTx = nBlockTx;
         nLastBlockSize = nBlockSize;
-        if (fDebug && GetBoolArg("-printmining"))
-            printf("CreateNewBlock(): total size %"PRI64u"\n", nBlockSize);
-        pblock->nBits          = GetNextWorkRequired(pindexPrev, pblock);
+        printf("CreateNewBlock(): total size %"PRI64u"\n", nBlockSize);
+    	if (fDebug && GetBoolArg("-printmining"))
+            printf("CreateNewBlock(): total size %"PRI64u"\n", nBlockSize);        
+		pblock->nBits          = GetNextWorkRequired(pindexPrev, pblock);
         pblock->vtx[0].vout[0].nValue = GetBlockValue(pblock->nBits, nFees);
         pblocktemplate->vTxFees[0] = -nFees;
 
@@ -4565,7 +4566,7 @@ bool CheckWork(CBlock* pblock, CWallet& wallet, CReserveKey& reservekey)
 
 void static BitcoinMiner(CWallet *pwallet)
 {
-    printf("PrimecoinMiner started\n");
+//    printf("PrimecoinMiner started\n");
     SetThreadPriority(THREAD_PRIORITY_LOWEST);
     RenameThread("primecoin-miner");
 
@@ -4581,7 +4582,7 @@ void static BitcoinMiner(CWallet *pwallet)
 
     try { loop {
         while (vNodes.empty())
-            MilliSleep(1000);
+            MilliSleep(500);
 
         //
         // Create new block
@@ -4595,7 +4596,7 @@ void static BitcoinMiner(CWallet *pwallet)
         CBlock *pblock = &pblocktemplate->block;
         IncrementExtraNonce(pblock, pindexPrev, nExtraNonce);
 
-        if (fDebug && GetBoolArg("-printmining"))
+		if (fDebug && GetBoolArg("-printmining"))
             printf("Running PrimecoinMiner with %"PRIszu" transactions in block (%u bytes)\n", pblock->vtx.size(),
                ::GetSerializeSize(*pblock, SER_NETWORK, PROTOCOL_VERSION));
 
@@ -4609,8 +4610,12 @@ void static BitcoinMiner(CWallet *pwallet)
         // Primecoin: try to find hash divisible by primorial
         CBigNum bnHashFactor;
         Primorial(nPrimorialHashFactor, bnHashFactor);
-        while ((pblock->GetHeaderHash() < hashBlockHeaderLimit || CBigNum(pblock->GetHeaderHash()) % bnHashFactor != 0) && pblock->nNonce < 0xffff0000)
+		uint256 phash = pblock->GetHeaderHash();
+		
+        while ((phash < hashBlockHeaderLimit || CBigNum(phash) % bnHashFactor != 0) && pblock->nNonce < 0xffff0000) {
             pblock->nNonce++;
+			phash = pblock->GetHeaderHash();
+			}
         if (pblock->nNonce >= 0xffff0000)
             continue;
         // Primecoin: primorial fixed multiplier
@@ -4639,7 +4644,7 @@ void static BitcoinMiner(CWallet *pwallet)
             unsigned int nTests = 0;
             unsigned int nPrimesHit = 0;
 
-            CBigNum bnMultiplierMin = bnPrimeMin * bnHashFactor / CBigNum(pblock->GetHeaderHash()) + 1;
+            CBigNum bnMultiplierMin = bnPrimeMin * bnHashFactor / CBigNum(phash) + 1;
             while (bnPrimorial < bnMultiplierMin)
             {
                 if (!PrimeTableGetNextPrime(nPrimorialMultiplier))
@@ -4650,7 +4655,7 @@ void static BitcoinMiner(CWallet *pwallet)
 
             // Primecoin: mine for prime chain
             unsigned int nProbableChainLength;
-            if (MineProbablePrimeChain(*pblock, bnFixedMultiplier, fNewBlock, nTriedMultiplier, nProbableChainLength, nTests, nPrimesHit))
+            if (MineProbablePrimeChain(*pblock, bnFixedMultiplier, fNewBlock, nTriedMultiplier, nProbableChainLength, nTests, nPrimesHit, phash))
             {
                 SetThreadPriority(THREAD_PRIORITY_NORMAL);
                 CheckWork(pblock, *pwalletMain, reservekey);
