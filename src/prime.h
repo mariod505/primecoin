@@ -7,10 +7,10 @@
 
 #include "main.h"
 
-static const unsigned int nMaxSieveSize = 1000000u;
+static const unsigned int nMaxSieveSize = 100000u;
 static const uint256 hashBlockHeaderLimit = (uint256(1) << 255);
 static const CBigNum bnOne = 1;
-static const CBigNum bnPrimeMax = (bnOne << 2000) - 1;
+static const CBigNum bnPrimeMax = (bnOne << 500) - 1;
 static const CBigNum bnPrimeMin = (bnOne << 255);
 
 extern unsigned int nTargetInitialLength;
@@ -57,7 +57,7 @@ bool TargetGetMint(unsigned int nBits, uint64& nMint);
 bool TargetGetNext(unsigned int nBits, int64 nInterval, int64 nTargetSpacing, int64 nActualSpacing, unsigned int& nBitsNext);
 
 // Mine probable prime chain of form: n = h * p# +/- 1
-bool MineProbablePrimeChain(CBlock& block, CBigNum& bnFixedMultiplier, bool& fNewBlock, unsigned int& nTriedMultiplier, unsigned int& nProbableChainLength, unsigned int& nTests, unsigned int& nPrimesHit);
+bool MineProbablePrimeChain(CBlock& block, CBigNum& bnFixedMultiplier, bool& fNewBlock, unsigned int& nTriedMultiplier, unsigned int& nProbableChainLength, unsigned int& nTests, unsigned int& nPrimesHit, uint256& headerhash);
 
 // Check prime proof-of-work
 enum // prime chain type
@@ -78,30 +78,34 @@ std::string GetPrimeChainName(unsigned int nChainType, unsigned int nChainLength
 // Sieve of Eratosthenes for proof-of-work mining
 class CSieveOfEratosthenes
 {
-    unsigned int nSieveSize; // size of the sieve
+
     unsigned int nBits; // target of the prime chain to search for
     uint256 hashBlockHeader; // block header hash
     CBigNum bnFixedFactor; // fixed factor to derive the chain
 
     // bitmaps of the sieve, index represents the variable part of multiplier
-    std::vector<bool> vfCompositeCunningham1;
-    std::vector<bool> vfCompositeCunningham2;
-    std::vector<bool> vfCompositeBiTwin;
+     bool vfCompositeCunningham1[1000000];
+     bool vfCompositeCunningham2[1000000];
+     bool vfCompositeBiTwin[1000000];
 
     unsigned int nPrimeSeq; // prime sequence number currently being processed
     unsigned int nCandidateMultiplier; // current candidate for power test
 
 public:
-    CSieveOfEratosthenes(unsigned int nSieveSize, unsigned int nBits, uint256 hashBlockHeader, CBigNum& bnFixedMultiplier)
+    CSieveOfEratosthenes(unsigned int nBits, uint256 hashBlockHeader, CBigNum& bnFixedMultiplier)
     {
-        this->nSieveSize = nSieveSize;
+
         this->nBits = nBits;
         this->hashBlockHeader = hashBlockHeader;
         this->bnFixedFactor = bnFixedMultiplier * CBigNum(hashBlockHeader);
         nPrimeSeq = 0;
-        vfCompositeCunningham1 = std::vector<bool> (1000000, false);
-        vfCompositeCunningham2 = std::vector<bool> (1000000, false);
-        vfCompositeBiTwin = std::vector<bool> (1000000, false);
+    	
+		for (int i = 0; i<1000000; ++i){
+            vfCompositeCunningham1[i] = false;
+            vfCompositeCunningham2[i] = false;
+            vfCompositeBiTwin[i] = false;
+        }
+
         nCandidateMultiplier = 0;
     }
 
@@ -109,7 +113,7 @@ public:
     unsigned int GetCandidateCount()
     {
         unsigned int nCandidates = 0;
-        for (unsigned int nMultiplier = 0; nMultiplier < nSieveSize; nMultiplier++)
+        for (unsigned int nMultiplier = 0; nMultiplier < nMaxSieveSize; nMultiplier++)
         {
             if (!vfCompositeCunningham1[nMultiplier] ||
                 !vfCompositeCunningham2[nMultiplier] ||
@@ -128,7 +132,7 @@ public:
         loop
         {
             nCandidateMultiplier++;
-            if (nCandidateMultiplier >= nSieveSize)
+			if (nCandidateMultiplier >= nMaxSieveSize)
             {
                 nCandidateMultiplier = 0;
                 return false;
@@ -140,11 +144,14 @@ public:
                 nVariableMultiplier = nCandidateMultiplier;
                 return true;
             }
+
         }
     }
-
+	
+	
     // Get progress percentage of the sieve
     unsigned int GetProgressPercentage();
+
 
     // Weave the sieve for the next prime in table
     // Return values:
