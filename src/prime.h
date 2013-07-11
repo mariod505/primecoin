@@ -7,10 +7,10 @@
 
 #include "main.h"
 
-static const unsigned int nMaxSieveSize = 100000u;
+static const unsigned int nMaxSieveSize = 500000u;
 static const uint256 hashBlockHeaderLimit = (uint256(1) << 255);
 static const CBigNum bnOne = 1;
-static const CBigNum bnPrimeMax = (bnOne << 500) - 1;
+static const CBigNum bnPrimeMax = (bnOne << 1000) - 1;
 static const CBigNum bnPrimeMin = (bnOne << 255);
 
 extern unsigned int nTargetInitialLength;
