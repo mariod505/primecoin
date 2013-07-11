@@ -345,7 +345,7 @@ bool MineProbablePrimeChain(CBlock& block, CBigNum& bnFixedMultiplier, bool& fNe
     fNewBlock = false;
 
     int64 nStart, nCurrent; // microsecond timer
-    CBlockIndex* pindexPrev = pindexBest;
+	CBlockIndex* pindexPrev = pindexBest;
     if (psieve.get() == NULL)
     {
         // Build sieve
@@ -503,7 +503,7 @@ std::string GetPrimeChainName(unsigned int nChainType, unsigned int nChainLength
 // Get progress percentage of the sieve
 unsigned int CSieveOfEratosthenes::GetProgressPercentage()
 {
-    return std::min(100u, (((nPrimeSeq >= vPrimes.size())? nPrimeTableLimit : vPrimes[nPrimeSeq]) * 100 / nSieveSize));
+    return std::min(100u, (((nPrimeSeq >= vPrimessz)? nPrimeTableLimit : vPrimes[nPrimeSeq]) * 100 / nMaxSieveSize));
 }
 
 
