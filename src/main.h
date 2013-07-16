@@ -570,7 +570,7 @@ public:
     bool IsStandard() const;
 
     /** Check for standard transaction types
-        @param[in] mapInputs	Map of previous transactions that have outputs we're spending
+        @param[in] mapInputs    Map of previous transactions that have outputs we're spending
         @return True if all inputs (scriptSigs) use only standard transaction forms
     */
     bool AreInputsStandard(CCoinsViewCache& mapInputs) const;
