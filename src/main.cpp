@@ -1122,7 +1122,10 @@ unsigned int static GetNextWorkRequired(const CBlockIndex* pindexLast, const CBl
 
 bool CheckProofOfWork(uint256 hashBlockHeader, unsigned int nBits, const CBigNum& bnProbablePrime, unsigned int& nChainType, unsigned int& nChainLength)
 {
-    if (!CheckPrimeProofOfWork(hashBlockHeader, nBits, bnProbablePrime, nChainType, nChainLength))
+    char *strProbablePrime = BN_bn2hex(&bnProbablePrime);
+    mpz_class mpzProbablePrime(strProbablePrime, 16);
+    OPENSSL_free(strProbablePrime);
+    if (!CheckPrimeProofOfWork(hashBlockHeader, nBits, mpzProbablePrime, nChainType, nChainLength))
         return error("CheckProofOfWork() : check failed for prime proof-of-work");
     return true;
 }
@@ -1747,7 +1750,7 @@ bool SetBestChain(CValidationState &state, CBlockIndex* pindexNew)
         if (fBenchmark)
             printf("- Disconnect: %.2fms\n", (GetTimeMicros() - nStart) * 0.001);
 
-        // Queue  memory transactions to resurrect.
+        // Queue memory transactions to resurrect.
         // We only do this for blocks after the last checkpoint (reorganisation before that
         // point should only happen with -reindex/-loadblock, or a misbehaving peer.
         BOOST_FOREACH(const CTransaction& tx, block.vtx)
@@ -1843,7 +1846,7 @@ bool SetBestChain(CValidationState &state, CBlockIndex* pindexNew)
     nTimeBestReceived = GetTime();
     nTransactionsUpdated++;
     uint256 nBlockWork = pindexNew->nChainWork - (pindexNew->pprev? pindexNew->pprev->nChainWork : 0);
-    printf("- SetBestChain: new best=%s  height=%d  difficulty=%.8g log2Work=%.8g  log2ChainWork=%.8g  tx=%lu  date=%s progress=%f\n",
+    printf("SetBestChain: new best=%s  height=%d  difficulty=%.8g log2Work=%.8g  log2ChainWork=%.8g  tx=%lu  date=%s progress=%f\n",
       hashBestChain.ToString().c_str(), nBestHeight, GetPrimeDifficulty(pindexNew->nBits), log(nBlockWork.getdouble())/log(2.0), log(nBestChainWork.getdouble())/log(2.0), (unsigned long)pindexNew->nChainTx,
       DateTimeStrFormat("%Y-%m-%d %H:%M:%S", pindexBest->GetBlockTime()).c_str(),
       Checkpoints::GuessVerificationProgress(pindexBest));
@@ -4435,10 +4438,9 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
 
         nLastBlockTx = nBlockTx;
         nLastBlockSize = nBlockSize;
-        printf("CreateNewBlock(): total size %"PRI64u"\n", nBlockSize);
-    	if (fDebug && GetBoolArg("-printmining"))
-            printf("CreateNewBlock(): total size %"PRI64u"\n", nBlockSize);        
-		pblock->nBits          = GetNextWorkRequired(pindexPrev, pblock);
+        if (fDebug && GetBoolArg("-printmining"))
+            printf("CreateNewBlock(): total size %"PRI64u"\n", nBlockSize);
+        pblock->nBits          = GetNextWorkRequired(pindexPrev, pblock);
         pblock->vtx[0].vout[0].nValue = GetBlockValue(pblock->nBits, nFees);
         pblocktemplate->vTxFees[0] = -nFees;
 
@@ -4566,7 +4568,7 @@ bool CheckWork(CBlock* pblock, CWallet& wallet, CReserveKey& reservekey)
 
 void static BitcoinMiner(CWallet *pwallet)
 {
-//    printf("PrimecoinMiner started\n");
+    printf("PrimecoinMiner started\n");
     SetThreadPriority(THREAD_PRIORITY_LOWEST);
     RenameThread("primecoin-miner");
 
@@ -4582,7 +4584,7 @@ void static BitcoinMiner(CWallet *pwallet)
 
     try { loop {
         while (vNodes.empty())
-            MilliSleep(500);
+            MilliSleep(1000);
 
         //
         // Create new block
@@ -4596,7 +4598,7 @@ void static BitcoinMiner(CWallet *pwallet)
         CBlock *pblock = &pblocktemplate->block;
         IncrementExtraNonce(pblock, pindexPrev, nExtraNonce);
 
-		if (fDebug && GetBoolArg("-printmining"))
+        if (fDebug && GetBoolArg("-printmining"))
             printf("Running PrimecoinMiner with %"PRIszu" transactions in block (%u bytes)\n", pblock->vtx.size(),
                ::GetSerializeSize(*pblock, SER_NETWORK, PROTOCOL_VERSION));
 
@@ -4608,18 +4610,24 @@ void static BitcoinMiner(CWallet *pwallet)
         unsigned int nTriedMultiplier = 0;
 
         // Primecoin: try to find hash divisible by primorial
-        CBigNum bnHashFactor;
-        Primorial(nPrimorialHashFactor, bnHashFactor);
-		uint256 phash = pblock->GetHeaderHash();
-		
-        while ((phash < hashBlockHeaderLimit || CBigNum(phash) % bnHashFactor != 0) && pblock->nNonce < 0xffff0000) {
+        mpz_class mpzHashFactor;
+        Primorial(nPrimorialHashFactor, mpzHashFactor);
+        
+        // mustyoshi's patch from https://bitcointalk.org/index.php?topic=251850.msg2689981#msg2689981
+        // with some gmp modifications
+        uint256 phash = pblock->GetHeaderHash();
+        mpz_class mpzHash;
+        mpz_set_uint256(mpzHash.get_mpz_t(), phash);
+        
+        while ((phash < hashBlockHeaderLimit || (mpzHash % mpzHashFactor != 0)) && pblock->nNonce < 0xffff0000) {
             pblock->nNonce++;
-			phash = pblock->GetHeaderHash();
-			}
+            phash = pblock->GetHeaderHash();
+            mpz_set_uint256(mpzHash.get_mpz_t(), phash);
+        }
         if (pblock->nNonce >= 0xffff0000)
             continue;
         // Primecoin: primorial fixed multiplier
-        CBigNum bnPrimorial;
+        mpz_class mpzPrimorial;
         unsigned int nRoundTests = 0;
         unsigned int nRoundPrimesHit = 0;
         int64 nPrimeTimerStart = GetTimeMicros();
@@ -4637,25 +4645,31 @@ void static BitcoinMiner(CWallet *pwallet)
             if (!PrimeTableGetPreviousPrime(nPrimorialMultiplier))
                 error("PrimecoinMiner() : primorial decrement overflow");
         }
-        Primorial(nPrimorialMultiplier, bnPrimorial);
+        Primorial(nPrimorialMultiplier, mpzPrimorial);
 
         loop
         {
             unsigned int nTests = 0;
             unsigned int nPrimesHit = 0;
+            unsigned int nChainsHit = 0;
 
-            CBigNum bnMultiplierMin = bnPrimeMin * bnHashFactor / CBigNum(phash) + 1;
-            while (bnPrimorial < bnMultiplierMin)
+            mpz_class mpzMultiplierMin = mpzPrimeMin * mpzHashFactor / mpzHash + 1;
+            while (mpzPrimorial < mpzMultiplierMin)
             {
                 if (!PrimeTableGetNextPrime(nPrimorialMultiplier))
                     error("PrimecoinMiner() : primorial minimum overflow");
-                Primorial(nPrimorialMultiplier, bnPrimorial);
+                Primorial(nPrimorialMultiplier, mpzPrimorial);
             }
-            CBigNum bnFixedMultiplier = (bnPrimorial > bnHashFactor)? (bnPrimorial / bnHashFactor) : 1;
+            mpz_class mpzFixedMultiplier;
+            if (mpzPrimorial > mpzHashFactor) {
+                mpzFixedMultiplier = mpzPrimorial / mpzHashFactor;
+            } else {
+                mpzFixedMultiplier = 1;
+            }
 
             // Primecoin: mine for prime chain
             unsigned int nProbableChainLength;
-            if (MineProbablePrimeChain(*pblock, bnFixedMultiplier, fNewBlock, nTriedMultiplier, nProbableChainLength, nTests, nPrimesHit, phash))
+            if (MineProbablePrimeChain(*pblock, mpzFixedMultiplier, fNewBlock, nTriedMultiplier, nProbableChainLength, nTests, nPrimesHit, nChainsHit, mpzHash))
             {
                 SetThreadPriority(THREAD_PRIORITY_NORMAL);
                 CheckWork(pblock, *pwalletMain, reservekey);
@@ -4668,35 +4682,41 @@ void static BitcoinMiner(CWallet *pwallet)
             // Meter primes/sec
             static int64 nPrimeCounter;
             static int64 nTestCounter;
+            static int64 nChainCounter;
+            int64 nMillisNow = GetTimeMillis();
             if (nHPSTimerStart == 0)
             {
-                nHPSTimerStart = GetTimeMillis();
+                nHPSTimerStart = nMillisNow;
                 nPrimeCounter = 0;
                 nTestCounter = 0;
+                nChainCounter = 0;
             }
             else
             {
                 nPrimeCounter += nPrimesHit;
                 nTestCounter += nTests;
+                nChainCounter += nChainsHit;
             }
-            if (GetTimeMillis() - nHPSTimerStart > 60000)
+            if (nMillisNow - nHPSTimerStart > 60000)
             {
                 static CCriticalSection cs;
                 {
                     LOCK(cs);
-                    if (GetTimeMillis() - nHPSTimerStart > 60000)
+                    if (nMillisNow - nHPSTimerStart > 60000)
                     {
-                        double dPrimesPerMinute = 60000.0 * nPrimeCounter / (GetTimeMillis() - nHPSTimerStart);
+                        double dPrimesPerMinute = 60000.0 * nPrimeCounter / (nMillisNow - nHPSTimerStart);
                         dPrimesPerSec = dPrimesPerMinute / 60.0;
-                        double dTestsPerMinute = 60000.0 * nTestCounter / (GetTimeMillis() - nHPSTimerStart);
-                        nHPSTimerStart = GetTimeMillis();
+                        double dTestsPerMinute = 60000.0 * nTestCounter / (nMillisNow - nHPSTimerStart);
+                        double dChainsPerMinute = 60000.0 * nChainCounter / (nMillisNow - nHPSTimerStart);
+                        nHPSTimerStart = nMillisNow;
                         nPrimeCounter = 0;
                         nTestCounter = 0;
+                        nChainCounter = 0;
                         static int64 nLogTime = 0;
-                        if (GetTime() - nLogTime > 60)
+                        if (nMillisNow - nLogTime > 59000)
                         {
-                            nLogTime = GetTime();
-                            printf("%s primemeter %9.0f prime/h %9.0f test/h\n", DateTimeStrFormat("%Y-%m-%d %H:%M:%S", nLogTime).c_str(), dPrimesPerMinute * 60.0, dTestsPerMinute * 60.0);
+                            nLogTime = nMillisNow;
+                            printf("%s primemeter %9.0f prime/h %9.0f test/h %9.0f %d-chains/h\n", DateTimeStrFormat("%Y-%m-%d %H:%M:%S", nLogTime / 1000).c_str(), dPrimesPerMinute * 60.0, dTestsPerMinute * 60.0, dChainsPerMinute * 60.0, nStatsChainLength);
                         }
                     }
                 }
