@@ -4584,7 +4584,7 @@ void static BitcoinMiner(CWallet *pwallet)
 
     try { loop {
         while (vNodes.empty())
-            MilliSleep(1000);
+            MilliSleep(200);
 
         //
         // Create new block
